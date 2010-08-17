@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2008 Bjoern Biesenbach <bjoern@bjoern-b.de>
+ * Copyright (C) 2007-2010 Bjoern Biesenbach <bjoern@bjoern-b.de>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -24,10 +24,18 @@
 
 #if defined(__AVR_ATmega8__)
 
+#ifdef _RFM02
+#define _RFM12_TXONLY
+#endif
+
 #define SDI		3
 #define SCK		5
 #define CS		2
 #define SDO		4
+
+#ifdef _RFM02
+	#define IRQ 1
+#endif
 
 #define FFIT_PIN PD2
 #define FFIT_DDR DDRD
@@ -43,6 +51,7 @@
 #define SCK		7
 #define CS		4
 #define SDO		6
+
 
 #define FFIT_PIN PD2
 #define FFIT_DDR DDRD

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2008 Bjoern Biesenbach <bjoern@bjoern-b.de>
+ * Copyright (C) 2007-2010 Bjoern Biesenbach <bjoern@bjoern-b.de>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -40,7 +40,6 @@
 /* rx/tx buffer size */
 #define MAX_BUF	140
 
-
 volatile unsigned char delaycnt;
 static volatile uint8_t timeout_counter;
 unsigned char txbuf[MAX_BUF],rxbuf[MAX_BUF];
@@ -73,8 +72,37 @@ unsigned char b[2];
 #define sbi(sfr, bit)     (_SFR_BYTE(sfr) |= _BV(bit))  
 #endif
 
+#ifdef _RFM02
+#warning Building for RFM02
+#endif
+
+#ifdef _RFM12_TXONLY
+#warning Building TXONLY
+#endif
+
+#ifdef _RFM02
+void rf12_trans(unsigned short wert)
+{	
+	unsigned char i;
+
+	cbi(RF_PORT, CS);
+	for (i=0; i<16; i++)
+	{
+		if (wert&32768)
+			sbi(RF_PORT, SDI);
+		else
+			cbi(RF_PORT, SDI);
+		sbi(RF_PORT, SCK);
+		wert<<=1;
+		_delay_us(0.3);
+		cbi(RF_PORT, SCK);
+	}
+	sbi(RF_PORT, CS);
+}
+#else
 unsigned short rf12_trans(unsigned short wert)
-{	CONVERTW val;
+{	
+	CONVERTW val;
 	val.w=wert;
 	cbi(RF_PORT, CS);
 	SPDR = val.b[1];
@@ -86,21 +114,28 @@ unsigned short rf12_trans(unsigned short wert)
 	sbi(RF_PORT, CS);
 	return val.w;
 }
+#endif
 
 void rf12_init(uint8_t firstinit)
 {
 	RF_PORT|=(1<<CS);
+#ifndef _RFM02
 	RF_DDR&=~(1<<SDO);
+#endif
 	RF_DDR|=(1<<SDI)|(1<<SCK)|(1<<CS);
 
+#ifndef _RFM12_TXONLY
 	FFIT_DDR &= ~(1<<FFIT_PIN);
 	FFIT_PORT |= (1<<FFIT_PIN);
+#endif
 
-#if F_CPU > 10000000
+#ifndef _RFM02
+#if F_CPU >= 10000000
 	SPCR = (1<<SPE)|(1<<MSTR)|(1<<SPR0);
 	SPSR = (1<<SPI2X);
 #else
 	SPCR=(1<<SPE)|(1<<MSTR);
+#endif
 #endif
 	
 #ifndef _RFM12_TXONLY
@@ -121,14 +156,18 @@ void rf12_init(uint8_t firstinit)
 		for (unsigned char i=0; i<20; i++)
 			_delay_ms(10);					// wait until POR done
 	}
-	//rf12_trans(0xC0E0);					// AVR CLK: 10MHz
+#ifdef _RFM02
+	rf12_trans(0xC0E0);			// power settings
+	rf12_trans(0x8F80);
+	rf12_trans(0xC2A0);			// enable tx sync bit, disable low bat detector
+#else
 	rf12_trans(0x80D7);					// Enable FIFO
 	rf12_trans(0xC2AB);					// Data Filter: internal
 	rf12_trans(0xCA81);					// Set FIFO mode
 	rf12_trans(0xE000);					// disable wakeuptimer
 	rf12_trans(0xC800);					// disable low duty cycle
 	rf12_trans(0xC4F7);					// AFC settings: autotuning: -10kHz...+7,5kHz
-
+#endif
 	rf12_RxHead=0;
 	rf12_RxTail=0;
 
@@ -170,7 +209,11 @@ static void rf12_stoprx(void)
 
 static void rf12_setbandwidth(unsigned char bandwidth, unsigned char gain, unsigned char drssi)
 {
+#ifdef _RFM02
+	rf12_trans(0x8F80|(bandwidth&7));
+#else
 	rf12_trans(0x9500|((bandwidth&7)<<5)|((gain&3)<<3)|(drssi&7));
+#endif
 }
 
 static void rf12_setfreq(unsigned short freq)
@@ -183,17 +226,33 @@ static void rf12_setfreq(unsigned short freq)
 
 static void rf12_setbaud(unsigned short baud)
 {
+#ifdef _RFM02
+	if (baud<1345)
+		baud=1345;
+	if (baud<19000)
+		rf12_trans(0xD240);		// 25% PLL current
+	else if (baud<37000)
+		rf12_trans(0xD2C0);		// 33% PLL current
+	else
+		rf12_trans(0xD200);		// 50% PLL current
+	rf12_trans(0xC800|((344828UL/baud)-1));	// Baudrate= 344827,59/(R+1)
+#else
 	if (baud<664)
 		baud=664;
 	if (baud<5400)						// Baudrate= 344827,58621/(R+1)/(1+CS*7)
 		rf12_trans(0xC680|((43104/baud)-1));	// R=(344828/8)/Baud-1
 	else
 		rf12_trans(0xC600|((344828UL/baud)-1));	// R=344828/Baud-1
+#endif
 }
 
 static void rf12_setpower(unsigned char power, unsigned char mod)
 {	
+#ifdef _RFM02
+	rf12_trans(0xB000|((power&7)<<8));
+#else
 	rf12_trans(0x9800|(power&7)|((mod&15)<<4));
+#endif
 }
 
 static inline void rf12_ready(void)
@@ -201,17 +260,33 @@ static inline void rf12_ready(void)
 	cbi(RF_PORT, CS);
 	asm("nop");
 	asm("nop");
+#ifndef _RFM02
 	while (!(RF_PIN&(1<<SDO)));			// wait until FIFO ready
+#endif
 }
 
 void rf12_txbyte(unsigned char val)
 {
+#ifdef _RFM02
+	unsigned char j;
+	for (j=0; j<8; j++)
+	{
+		while(RF_PIN&(1<<IRQ));
+		while(!(RF_PIN&(1<<IRQ)));
+		if (val&128)
+			sbi(RF_PORT, SDI);
+		else
+			cbi(RF_PORT, SDI);
+		val<<=1;
+	}
+#else
 	rf12_ready();
 	rf12_trans(0xB800|val);
 	if ((val==0x00)||(val==0xFF))		// Stuffbyte einfügen um ausreichend Pegelwechsel zu haben
 	{	rf12_ready();
 		rf12_trans(0xB8AA);
 	}
+#endif
 }
 
 #ifndef _RFM12_TXONLY
@@ -230,8 +305,32 @@ unsigned char rf12_rxbyte(void)
 
 //void rf12_txdata(unsigned char *data, unsigned char number, unsigned char status, unsigned char id, unsigned char toAddress)
 static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_t length, uint8_t id)
-{	unsigned char i, crc;
+{	
+	unsigned char i, crc;
 	//LED_TX=1;
+	
+	
+#ifdef _RFM02
+	unsigned char j,wert;
+	wert=0xC6;
+	cbi(RF_PORT, CS);
+	for (i=0; i<8; i++)
+	{
+		if (wert&128)
+		sbi(RF_PORT, SDI);
+		else
+			cbi(RF_PORT, SDI);
+		sbi(RF_PORT, SCK);
+		wert<<=1;
+		_delay_us(0.2);
+		cbi(RF_PORT, SCK);
+	}
+	rf12_txbyte(0xAA);
+	rf12_txbyte(0xAA);
+	rf12_txbyte(0xAA);
+	rf12_txbyte(0x2D);
+	rf12_txbyte(0xD4);
+#else
 	rf12_trans(0x8238);					// TX on
 	rf12_ready();
 	rf12_trans(0xB8AA);					// Sync Data
@@ -243,7 +342,7 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 	rf12_trans(0xB82D);
 	rf12_ready();
 	rf12_trans(0xB8D4);
-
+#endif
 	/* New protocol starts here 
 	 *
 	 * | Type | Length | Source | Destination | Id | Data | CRC |
@@ -299,6 +398,10 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 			{
 				crc = _crc_ibutton_update(crc, *data);
 				rf12_txbyte(*data++);
+#ifdef _RFM02
+				if(*(data-1) == 0x00 || *(data-1) == 0xFF)
+					rf12_txbyte(0xAA);
+#endif
 			}
 			rf12_txbyte(crc); // append crc
 			rf12_txbyte(0); // dummy data
@@ -311,6 +414,11 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 		case 0x1A:
 			break;
 	}
+#ifdef _RMF02
+	sbi(RF_PORT, CS);
+	while(RF_PIN&(1<<IRQ));		// wait until transfer done
+	rf12_trans(0xC464);			// TX off after 10us
+#endif
 
 }
 
@@ -518,6 +626,9 @@ void rf12_txpacket(uint8_t *data, uint8_t count, uint8_t address, uint8_t ack_re
 
 void rf12_sleep(void)
 {
+#ifdef _RFM02
+	rf12_trans(0xC001);			// power settings
+#endif
 	rf12_trans(0x8201);
 }
 
