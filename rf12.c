@@ -65,6 +65,11 @@ unsigned int w;
 unsigned char b[2];
 } CONVERTW;
 
+#define LED_RX_ON() (PORTC &= ~(1<<PC0));
+#define LED_RX_OFF() (PORTC |= (1<<PC0));
+#define LED_TX_ON() (PORTC &= ~(1<<PC1));
+#define LED_TX_OFF() (PORTC |= (1<<PC1));
+
 #ifndef cbi
 #define cbi(sfr, bit)     (_SFR_BYTE(sfr) &= ~_BV(bit)) 
 #endif
@@ -307,6 +312,9 @@ unsigned char rf12_rxbyte(void)
 static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_t length, uint8_t id)
 {	
 	unsigned char i, crc;
+#ifdef _BASE_USB
+	LED_TX_ON();
+#endif
 	//LED_TX=1;
 	
 	
@@ -419,6 +427,9 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 	while(RF_PIN&(1<<IRQ));		// wait until transfer done
 	rf12_trans(0xC464);			// TX off after 10us
 #endif
+#ifdef _BASE_USB
+	LED_TX_OFF();
+#endif
 
 }
 
@@ -430,8 +441,15 @@ ISR(SIG_INTERRUPT0)
 	static unsigned char rx_lastid=255, toAddress, fromAddress, type;
 	static uint16_t stupidcounter = 0;
 
+#ifdef _BASE_USB
+	LED_RX_ON();
+#endif
+
 	if(timeout_counter > 7) //0.7ms
 	{
+#ifdef _BASE_USB
+		LED_RX_OFF();
+#endif
 		bytecnt = 0;
 		stupidcounter = 0;
 		timeout_counter = 0;
@@ -539,6 +557,9 @@ ISR(SIG_INTERRUPT0)
 			}
 			bytecnt=0;
 			stupidcounter = 0;
+#ifdef _BASE_USB
+		LED_RX_OFF();
+#endif
 		}
 	} // end type 0x19
 	else
