@@ -284,6 +284,20 @@ void rf12_txbyte(unsigned char val)
 			cbi(RF_PORT, SDI);
 		val<<=1;
 	}
+	if(val == 0x00 || val == 0xFF)
+	{
+		val = 0xAA;
+		for (j=0; j<8; j++)
+		{
+			while(RF_PIN&(1<<IRQ));
+			while(!(RF_PIN&(1<<IRQ)));
+			if (val&128)
+				sbi(RF_PORT, SDI);
+			else
+				cbi(RF_PORT, SDI);
+			val<<=1;
+		}
+	}
 #else
 	rf12_ready();
 	rf12_trans(0xB800|val);
