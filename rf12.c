@@ -65,6 +65,10 @@ unsigned int w;
 unsigned char b[2];
 } CONVERTW;
 
+#if !defined _RFM01 && !defined _RFM02 && !defined _RFM12 && !defined _TXONLY
+#error "define _RFM01 or _RFM02 or _RFM12 or _TXONLY!"
+#endif
+
 #define LED_RX_ON() (PORTC &= ~(1<<PC0));
 #define LED_RX_OFF() (PORTC |= (1<<PC0));
 #define LED_TX_ON() (PORTC &= ~(1<<PC1));
@@ -78,14 +82,19 @@ unsigned char b[2];
 #endif
 
 #ifdef _RFM02
-#warning Building for RFM02
+#warning Building for RFM02 TX Module
+#define _TXONLY
 #endif
 
-#ifdef _RFM12_TXONLY
+#ifdef _RFM01
+#warning Building for RFM01 RX Module
+#endif
+
+#ifdef _TXONLY
 #warning Building TXONLY
 #endif
 
-#ifdef _RFM02
+#if defined _RFM02 || defined _RFM01
 void rf12_trans(unsigned short wert)
 {	
 	unsigned char i;
@@ -124,17 +133,20 @@ unsigned short rf12_trans(unsigned short wert)
 void rf12_init(uint8_t firstinit)
 {
 	RF_PORT|=(1<<CS);
+#ifdef _RFM02
+	RF_PORT |=(1<<IRQ);
+#endif
 #ifndef _RFM02
 	RF_DDR&=~(1<<SDO);
 #endif
 	RF_DDR|=(1<<SDI)|(1<<SCK)|(1<<CS);
 
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 	FFIT_DDR &= ~(1<<FFIT_PIN);
 	FFIT_PORT |= (1<<FFIT_PIN);
 #endif
 
-#ifndef _RFM02
+#ifdef _RFM12
 #if F_CPU >= 10000000
 	SPCR = (1<<SPE)|(1<<MSTR)|(1<<SPR0);
 	SPSR = (1<<SPI2X);
@@ -143,7 +155,7 @@ void rf12_init(uint8_t firstinit)
 #endif
 #endif
 	
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 #ifdef _3WRGB
 	TCCR0 = (1<<CS00);
 	OCR0 =((F_CPU)/10000)-1;
@@ -162,10 +174,20 @@ void rf12_init(uint8_t firstinit)
 			_delay_ms(10);					// wait until POR done
 	}
 #ifdef _RFM02
-	rf12_trans(0xC0E0);			// power settings
+	rf12_trans(0xC0E1);			// power settings
+   	_delay_ms(5);
 	rf12_trans(0x8F80);
 	rf12_trans(0xC2A0);			// enable tx sync bit, disable low bat detector
-#else
+#endif
+#ifdef _RFM01
+	rf12_trans(0xC0E1);
+	rf12_trans(0x8979);
+	rf12_trans(0xC4AB);
+	rf12_trans(0xE000);
+	rf12_trans(0xCC00);
+	rf12_trans(0xC6F7);			// AFC settings: autotuning: -10kHz...+7,5kHz
+#endif
+#ifdef _RFM12
 	rf12_trans(0x80D7);					// Enable FIFO
 	rf12_trans(0xC2AB);					// Data Filter: internal
 	rf12_trans(0xCA81);					// Set FIFO mode
@@ -176,7 +198,7 @@ void rf12_init(uint8_t firstinit)
 	rf12_RxHead=0;
 	rf12_RxTail=0;
 
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 	rf12_rxmode();
 #endif
 }
@@ -184,29 +206,37 @@ void rf12_init(uint8_t firstinit)
 void rf12_config(unsigned short baudrate, unsigned char channel, unsigned char power, unsigned char environment)
 {
 	rf12_setfreq(RF12FREQ(433.4)+13*channel); // Sende/Empfangsfrequenz auf 433,4MHz + channel * 325kHz einstellen
+#ifndef _RFM01
    	rf12_setpower(0, 5);					// 6mW Ausgangangsleistung, 90kHz Frequenzshift
    	rf12_setbandwidth(4, environment, 0);	// 200kHz Bandbreite, Verstärkung je nach Umgebungsbedingungen, DRSSI threshold: -103dBm (-environment*6dB)
+#endif
 	rf12_setbaud(baudrate);					// Baudrate
 }
 
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 
 static void rf12_rxmode(void)
 {
+#ifndef _RFM01
 	rf12_trans(0x82C8);					// RX on
 	rf12_trans(0xCA81);					// set FIFO mode
 	_delay_ms(.8);
 	rf12_trans(0xCA83);					// enable FIFO: sync word search
 	rf12_trans(0);
-	//MCUCR |= (1<<ISC01)|(1<<ISC00);
-	//GIFR=(1<<INTF0);
+#else
+	rf12_trans(0xCE84);
+	_delay_us(100);
+	rf12_trans(0xCE87);
+#endif
 	GICR|=(1<<INT0);					// Low Level Interrupt für FFIT (über Inverter angeschlossen !)
 }
 
 static void rf12_stoprx(void)
 {
 	GICR&=~(1<<INT0);					// Interrupt aus
+#ifndef _RFM01
 	rf12_trans(0x8208);					// RX off
+#endif
 	_delay_ms(1);
 }
 
@@ -241,7 +271,16 @@ static void rf12_setbaud(unsigned short baud)
 	else
 		rf12_trans(0xD200);		// 50% PLL current
 	rf12_trans(0xC800|((344828UL/baud)-1));	// Baudrate= 344827,59/(R+1)
-#else
+#endif
+#ifdef _RFM01
+	if (baud<664)
+		baud=664;
+	if (baud<5400)						// Baudrate= 344827,58621/(R+1)/(1+CS*7)
+		rf12_trans(0xC880|((43104/baud)-1));	// R=(344828/8)/Baud-1
+	else
+		rf12_trans(0xC800|((344828UL/baud)-1));	// R=344828/Baud-1
+#endif
+#ifdef _RFM12
 	if (baud<664)
 		baud=664;
 	if (baud<5400)						// Baudrate= 344827,58621/(R+1)/(1+CS*7)
@@ -273,6 +312,7 @@ static inline void rf12_ready(void)
 void rf12_txbyte(unsigned char val)
 {
 #ifdef _RFM02
+	unsigned char val_temp = val;
 	unsigned char j;
 	for (j=0; j<8; j++)
 	{
@@ -284,7 +324,7 @@ void rf12_txbyte(unsigned char val)
 			cbi(RF_PORT, SDI);
 		val<<=1;
 	}
-	if(val == 0x00 || val == 0xFF)
+	if(val_temp == 0x00 || val_temp == 0xFF)
 	{
 		val = 0xAA;
 		for (j=0; j<8; j++)
@@ -298,7 +338,8 @@ void rf12_txbyte(unsigned char val)
 			val<<=1;
 		}
 	}
-#else
+#endif
+#ifdef _RFM12
 	rf12_ready();
 	rf12_trans(0xB800|val);
 	if ((val==0x00)||(val==0xFF))		// Stuffbyte einfügen um ausreichend Pegelwechsel zu haben
@@ -308,15 +349,58 @@ void rf12_txbyte(unsigned char val)
 #endif
 }
 
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 
 unsigned char rf12_rxbyte(void)
-{	unsigned char val;
+{	
+	unsigned char val;
+	unsigned char i;
+#ifdef _RFM01
+	cbi(RF_PORT,SDI);
+	rf12_ready();
+	for(i=0;i<16;i++)
+	{
+		sbi(RF_PORT, SCK);
+		_delay_us(0.1);
+		cbi(RF_PORT, SCK);
+	}
+	val = 0;
+	for(i=0;i<8;i++)
+	{
+		val <<=1;
+		if (RF_PIN&(1<<SDO))
+			val |= 1;
+		sbi(RF_PORT, SCK);
+		_delay_us(0.2);
+		cbi(RF_PORT, SCK);
+	}
+	sbi(RF_PORT, CS);
+
+	if((val == 0x00) || (val == 0xFF)) // weg mit stuffbyte
+	{
+		rf12_ready();
+		for(i=0;i<16;i++)
+		{
+			sbi(RF_PORT, SCK);
+			_delay_us(0.1);
+			cbi(RF_PORT, SCK);
+		}
+		for(i=0;i<8;i++)
+		{
+			sbi(RF_PORT, SCK);
+			_delay_us(0.2);
+			cbi(RF_PORT, SCK);
+		}
+	}
+	sbi(RF_PORT, CS);
+
+#else
 	val =rf12_trans(0xB000);
 	if ((val==0x00)||(val==0xFF))		// Stuffbyte wieder entfernen
 	{	rf12_ready();
 		rf12_trans(0xB000);
 	}
+#endif
 	return val;
 }
 
@@ -333,7 +417,7 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 	
 	
 #ifdef _RFM02
-	unsigned char j,wert;
+	unsigned char wert;
 	wert=0xC6;
 	cbi(RF_PORT, CS);
 	for (i=0; i<8; i++)
@@ -352,7 +436,8 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 	rf12_txbyte(0xAA);
 	rf12_txbyte(0x2D);
 	rf12_txbyte(0xD4);
-#else
+#endif
+#ifdef _RFM12
 	rf12_trans(0x8238);					// TX on
 	rf12_ready();
 	rf12_trans(0xB8AA);					// Sync Data
@@ -420,14 +505,12 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 			{
 				crc = _crc_ibutton_update(crc, *data);
 				rf12_txbyte(*data++);
-#ifdef _RFM02
-				if(*(data-1) == 0x00 || *(data-1) == 0xFF)
-					rf12_txbyte(0xAA);
-#endif
 			}
 			rf12_txbyte(crc); // append crc
 			rf12_txbyte(0); // dummy data
+#ifdef _RFM12
 			rf12_trans(0x8208); // tx off
+#endif
 			break;
 			
 
@@ -447,7 +530,7 @@ static void rf12_txdata(uint8_t type, uint8_t destination, uint8_t *data, uint8_
 
 }
 
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 
 ISR(SIG_INTERRUPT0)
 {	
@@ -459,8 +542,13 @@ ISR(SIG_INTERRUPT0)
 	LED_RX_ON();
 #endif
 
+#ifdef _RFM01
+	if(timeout_counter > 100) //0.7ms
+	{
+#else
 	if(timeout_counter > 7) //0.7ms
 	{
+#endif
 #ifdef _BASE_USB
 		LED_RX_OFF();
 #endif
@@ -475,33 +563,6 @@ ISR(SIG_INTERRUPT0)
 		bytecnt=1;
 		timeout_counter = 0;
 	}
-	/* for future use, broadcast packet */
-	/*else if(type == 0x00)
-	{
-		if(bytecnt==2)
-		{
-			number = rf12_rxbyte();
-			bytecnt++;
-		}
-		else
-		{
-			unsigned char i, tmphead;
-			tmphead = rf12_RxHead;
-			for(i=0; i<number; i++)	// Komplettes Paket in den Empfangspuffer kopieren
-			{	
-				tmphead++;
-				if (tmphead>=RX_BUF)
-					tmphead=0;
-				if (tmphead == rf12_RxTail)	// receive buffer overflow !!!
-					break;				// restlichen Daten ignorieren
-				else
-					rxbuf[tmphead] = rf_data[i]; // Daten in Empfangspuffer kopieren
-			}
-			rf12_RxHead = tmphead;
-			bytecnt=0;
-			stupidcounter = 0;
-		}
-	}*/
 	else if(type == 0x19)
 	{
 		if (bytecnt==1)
@@ -545,8 +606,15 @@ ISR(SIG_INTERRUPT0)
 			timeout_counter = 0;
 			unsigned char crcref;
 			crcref = rf12_rxbyte();			// CRC received
+#ifdef _RFM12
 			rf12_trans(0xCA81);			// restart syncword detection:
 			rf12_trans(0xCA83);			// enable FIFO
+#endif
+#ifdef _RFM01
+			rf12_trans(0xCE84);
+			_delay_us(1);
+			rf12_trans(0xCE87);
+#endif
 
 			if (crcref == crc && toAddress == MY_ADDRESS) // CRC ok and packet for me
 			{
@@ -577,12 +645,25 @@ ISR(SIG_INTERRUPT0)
 		}
 	} // end type 0x19
 	else
+	{
 		rf12_rxbyte();
+#ifdef _RFM01
+		rf12_trans(0xCE84);
+		_delay_us(1);
+		rf12_trans(0xCE87);
+#endif
+		bytecnt = 0;
+	}
 
 	if(++stupidcounter > 256)
 	{
 		bytecnt = 0;
 		stupidcounter = 0;
+#ifdef _RFM01
+		rf12_trans(0xCE84);
+		_delay_us(1);
+		rf12_trans(0xCE87);
+#endif
 	}
 }
 
@@ -590,7 +671,7 @@ ISR(SIG_INTERRUPT0)
 
 /** alle 100us
  */
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 
 /* hack for a special device where i need
  * timer1 for pwm */
@@ -617,7 +698,7 @@ ISR(SIG_OUTPUT_COMPARE1A)
 
 #endif
 
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 
 unsigned char rf12_data(void)
 {
@@ -645,11 +726,11 @@ void rf12_txpacket(uint8_t *data, uint8_t count, uint8_t address, uint8_t ack_re
 {
 	if(!ack_required)
 	{
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 		rf12_stoprx();
 #endif
 		rf12_txdata(0x19, address, data, count, tx_id++);
-#ifndef _RFM12_TXONLY
+#ifndef _TXONLY
 		rf12_rxmode();
 #endif
 	}
@@ -662,6 +743,8 @@ void rf12_txpacket(uint8_t *data, uint8_t count, uint8_t address, uint8_t ack_re
 void rf12_sleep(void)
 {
 #ifdef _RFM02
+	rf12_trans(0xC400); //sleep command!	
+	_delay_ms(2);
 	rf12_trans(0xC001);			// power settings
 #endif
 	rf12_trans(0x8201);
