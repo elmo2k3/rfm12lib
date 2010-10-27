@@ -33,10 +33,6 @@
 #include "rf12.h"
 #include "main.h"
 
-#ifdef _GLCD
-#include "clock.h"
-#endif
-
 /* rx/tx buffer size */
 #define MAX_BUF	140
 
@@ -161,8 +157,8 @@ void rf12_init(uint8_t firstinit)
 	OCR0 =((F_CPU)/10000)-1;
 	TIMSK |= (1<<OCIE0);
 #else 
-	TCCR1A=0;
-	TCCR1B=(1<<WGM12)|1;
+	TCCR1A= 0;
+	TCCR1B=(1<<WGM12)| (1<<CS10);
 	OCR1A=((F_CPU)/10000)-1;
 	TIMSK|=(1<<OCIE1A);
 #endif
@@ -683,16 +679,6 @@ ISR(SIG_OUTPUT_COMPARE1A)
 {	
 	if(timeout_counter++ > 254)
 		timeout_counter = 255;
-
-/* hack where i need a clock */
-#ifdef _GLCD
-	static uint16_t prescaler = 10000;
-	if(--prescaler == 0)
-	{
-		prescaler = 10000;
-		clock();
-	}
-#endif
 
 }
 
