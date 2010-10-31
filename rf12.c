@@ -151,18 +151,18 @@ void rf12_init(uint8_t firstinit)
 #endif
 #endif
 	
-#ifndef _TXONLY
-#ifdef _3WRGB
-	TCCR0 = (1<<CS00);
-	OCR0 =((F_CPU)/10000)-1;
-	TIMSK |= (1<<OCIE0);
-#else 
-	TCCR1A= 0;
-	TCCR1B=(1<<WGM12)| (1<<CS10);
-	OCR1A=((F_CPU)/10000)-1;
-	TIMSK|=(1<<OCIE1A);
-#endif
-#endif
+//#ifndef _TXONLY
+//#ifdef _3WRGB
+//	TCCR0 = (1<<CS00);
+//	OCR0 =((F_CPU)/10000)-1;
+//	TIMSK |= (1<<OCIE0);
+//#else 
+//	TCCR1A= 0;
+//	TCCR1B=(1<<WGM12)| (1<<CS10);
+//	OCR1A=((F_CPU)/10000)-1;
+//	TIMSK|=(1<<OCIE1A);
+//#endif
+//#endif
 
 	if(firstinit)
 	{
@@ -371,10 +371,15 @@ unsigned char rf12_rxbyte(void)
 		cbi(RF_PORT, SCK);
 	}
 	sbi(RF_PORT, CS);
+	sbi(RF_PORT,SDI);
+	_delay_us(1);
+	cbi(RF_PORT,SDI);
 
 	if((val == 0x00) || (val == 0xFF)) // weg mit stuffbyte
 	{
-		rf12_ready();
+		_delay_ms(0.5);
+		cbi(RF_PORT, CS);
+		//rf12_ready();
 		for(i=0;i<16;i++)
 		{
 			sbi(RF_PORT, SCK);
@@ -389,6 +394,7 @@ unsigned char rf12_rxbyte(void)
 		}
 	}
 	sbi(RF_PORT, CS);
+	sbi(RF_PORT,SDI);
 
 #else
 	val =rf12_trans(0xB000);
@@ -533,16 +539,17 @@ ISR(SIG_INTERRUPT0)
 	static unsigned char bytecnt=0, number, id, crc,rf_data[MAX_BUF];
 	static unsigned char rx_lastid=255, toAddress, fromAddress, type;
 	static uint16_t stupidcounter = 0;
+	cli();
 
 #ifdef _BASE_USB
 	LED_RX_ON();
 #endif
 
 #ifdef _RFM01
-	if(timeout_counter > 100) //0.7ms
+	if(timeout_counter > 5)
 	{
 #else
-	if(timeout_counter > 7) //0.7ms
+	if(timeout_counter > 7)
 	{
 #endif
 #ifdef _BASE_USB
@@ -645,8 +652,9 @@ ISR(SIG_INTERRUPT0)
 		rf12_rxbyte();
 #ifdef _RFM01
 		rf12_trans(0xCE84);
-		_delay_us(1);
+		_delay_us(100);
 		rf12_trans(0xCE87);
+		_delay_us(100);
 #endif
 		bytecnt = 0;
 	}
@@ -657,10 +665,12 @@ ISR(SIG_INTERRUPT0)
 		stupidcounter = 0;
 #ifdef _RFM01
 		rf12_trans(0xCE84);
-		_delay_us(1);
+		_delay_us(100);
 		rf12_trans(0xCE87);
+		_delay_us(100);
 #endif
 	}
+	sei();
 }
 
 #endif
@@ -671,15 +681,20 @@ ISR(SIG_INTERRUPT0)
 
 /* hack for a special device where i need
  * timer1 for pwm */
-#ifdef _3WRGB
-ISR(SIG_OUTPUT_COMPARE0)
-#else
-ISR(SIG_OUTPUT_COMPARE1A)
-#endif
-{	
+//#ifdef _3WRGB
+//ISR(SIG_OUTPUT_COMPARE0)
+//#else
+//ISR(SIG_OUTPUT_COMPARE1A)
+//#endif
+//{	
+//	if(timeout_counter++ > 254)
+//		timeout_counter = 255;
+//}
+
+void rf12_every_1_ms()
+{
 	if(timeout_counter++ > 254)
 		timeout_counter = 255;
-
 }
 
 #endif

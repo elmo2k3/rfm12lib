@@ -116,6 +116,9 @@ extern unsigned char rf12_busy(void);
  */
 void rf12_sleep(void);
 
+// call this function every 1ms from timer interrupt
+void rf12_every_1_ms(void);
+
 /** macro for calculating frequency value out of frequency in MHz
  */
 #define RF12FREQ(freq)	((unsigned short)((freq-430.0)/0.0025))
