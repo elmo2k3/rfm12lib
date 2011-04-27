@@ -36,15 +36,12 @@
 /* rx/tx buffer size */
 #define MAX_BUF	140
 
-volatile unsigned char delaycnt;
 static volatile uint8_t timeout_counter;
-unsigned char txbuf[MAX_BUF],rxbuf[MAX_BUF];
-volatile unsigned char rf12_RxHead;
-volatile unsigned char rf12_RxTail;
-unsigned char tx_cnt, tx_status, retrans_cnt;
-unsigned volatile char flags;
+static unsigned char rxbuf[MAX_BUF];
+static volatile unsigned char rf12_RxHead;
+static volatile unsigned char rf12_RxTail;
 
-unsigned char tx_id __attribute__((section(".noinit"))); 
+static unsigned char tx_id __attribute__((section(".noinit"))); 
 
 void tx_packet(unsigned char retrans);
 
@@ -172,7 +169,11 @@ void rf12_init(uint8_t firstinit)
 #ifdef _RFM02
 	rf12_trans(0xC0E1);			// power settings
    	_delay_ms(5);
+#ifdef _868MHZ
+	rf12_trans(0x9780);
+#else
 	rf12_trans(0x8F80);
+#endif
 	rf12_trans(0xC2A0);			// enable tx sync bit, disable low bat detector
 #endif
 #ifdef _RFM01
@@ -184,7 +185,11 @@ void rf12_init(uint8_t firstinit)
 	rf12_trans(0xC6F7);			// AFC settings: autotuning: -10kHz...+7,5kHz
 #endif
 #ifdef _RFM12
+#ifdef _868MHZ
+	rf12_trans(0x80E7);
+#else
 	rf12_trans(0x80D7);					// Enable FIFO
+#endif
 	rf12_trans(0xC2AB);					// Data Filter: internal
 	rf12_trans(0xCA81);					// Set FIFO mode
 	rf12_trans(0xE000);					// disable wakeuptimer
@@ -201,7 +206,11 @@ void rf12_init(uint8_t firstinit)
 
 void rf12_config(unsigned short baudrate, unsigned char channel, unsigned char power, unsigned char environment)
 {
+#ifdef _868MHZ
+	rf12_setfreq(RF12FREQ(868.92));
+#else
 	rf12_setfreq(RF12FREQ(433.4)+13*channel); // Sende/Empfangsfrequenz auf 433,4MHz + channel * 325kHz einstellen
+#endif
 #ifndef _RFM01
    	rf12_setpower(0, 5);					// 6mW Ausgangangsleistung, 90kHz Frequenzshift
    	rf12_setbandwidth(4, environment, 0);	// 200kHz Bandbreite, Verstärkung je nach Umgebungsbedingungen, DRSSI threshold: -103dBm (-environment*6dB)
@@ -241,7 +250,11 @@ static void rf12_stoprx(void)
 static void rf12_setbandwidth(unsigned char bandwidth, unsigned char gain, unsigned char drssi)
 {
 #ifdef _RFM02
+#ifdef _868MHZ
+	rf12_trans(0x9780|(bandwidth&7));
+#else
 	rf12_trans(0x8F80|(bandwidth&7));
+#endif
 #else
 	rf12_trans(0x9500|((bandwidth&7)<<5)|((gain&3)<<3)|(drssi&7));
 #endif

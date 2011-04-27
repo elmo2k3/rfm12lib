@@ -121,7 +121,12 @@ void rf12_every_1_ms(void);
 
 /** macro for calculating frequency value out of frequency in MHz
  */
+#ifdef _868MHZ
+#warning Building 868MHz version
+#define RF12FREQ(freq)	((unsigned short)((freq-860.0)/0.005))
+#else
 #define RF12FREQ(freq)	((unsigned short)((freq-430.0)/0.0025))
+#endif
 
 #define QUIET		1
 #define NORMAL		2
